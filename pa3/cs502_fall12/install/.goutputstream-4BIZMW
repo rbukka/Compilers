@@ -1,0 +1,413 @@
+#include <stdio.h>
+#include "config.h"
+#include "system.h"
+#include "coretypes.h"
+#include "tm.h"
+#include "tree.h"
+#include "cgraph.h"
+#include "hashtab.h"
+#include "tree-iterator.h"
+
+//A debug flag to print debug statements if needed.
+#define DEBUG 1
+
+//Maximum number of structures in a program to store history.
+#define MAX_STRUCTURES 40
+
+//Main function which recurses through the nodes
+int write_generic_node(tree node,int nspaces, bool sp);
+
+//Function to print the array name and its dimensions
+void write_array_domain (tree domain, int spc);
+
+//Function to print a declaration like "int a"
+void write_decl_name (tree node);
+
+//Function to print the complete declaration of a function
+void write_function_declaration (tree node,int spc);
+
+//Function to write a declaration statement
+void write_declaration (tree t, int spc);
+
+//Function to write a new line
+void writeNewLine();
+
+//Function to write space into a file
+void writeSpace(int spc);
+
+//Function to write a given string into a file
+void writeString(const char * str);
+
+//An array to hold the structures already declared
+int structHistory[MAX_STRUCTURES];
+
+//global counter to iterate the above array
+static int counter=0;
+
+//variable used for  indentation
+int indent = 0;
+
+//Macro for indentation
+#define INDENT(SPACE) do { \
+  int i; for (i = 0; i<SPACE; i++) writeSpace(1); } while (0)
+
+//File to store the final output
+FILE *fp;  
+
+//Helper to write indentation
+void write_indentation()
+{
+	int i;
+	for(i=1;i<=indent;i++)
+	{
+		writeString("   ");
+	}
+}
+
+//Print "if" statements in a program
+void print_if_statements(tree node)
+{
+	writeNewLine();
+	indent++;	
+	//if it is a statement list the ";" is handled later. 
+	if(TREE_CODE(node)== STATEMENT_LIST)
+	{
+		write_generic_node(node,0,false);
+	}
+	//need to print a semicolon here.
+	else
+	{
+		write_indentation();		
+		write_generic_node(node,0,false);
+		writeString(";");
+		writeNewLine();
+	}
+	indent--;
+	write_indentation();		
+}
+
+//function to check if the history array contains a structure
+int contains(int addr)
+{
+	int i=0;
+	for(i=0;i<MAX_STRUCTURES;i++)
+	{
+		if(addr == structHistory[i])
+			return 0;
+	}
+	return -1;
+}
+
+//function to print declaration of a structure
+void print_struct_decl (const_tree node, int spc)
+{
+	if(DEBUG)
+		printf("%s\n", "In print_struct_decl");	
+
+	if(contains(&TYPE_NAME (node)) == -1)
+	{
+	
+		structHistory[counter++] = &TYPE_NAME (node);
+
+		/* Print the name of the structure.  */
+		if (TYPE_NAME (node))
+		{
+			INDENT (spc);
+			if (TREE_CODE (node) == RECORD_TYPE)				
+				writeString("struct ");		
+
+			write_generic_node(TYPE_NAME (node), spc, false);
+		}
+
+		/* Print the contents of the structure.  */
+		writeNewLine();
+
+		INDENT (spc);
+		
+		writeString("{");
+	
+		
+		writeNewLine();	
+
+		/* Print the fields of the structure.  */
+		{
+			tree tmp;
+			tmp = TYPE_FIELDS (node);
+			while (tmp)
+			{
+				if (TREE_TYPE (tmp) != node  && (TREE_CODE (TREE_TYPE (tmp)) != POINTER_TYPE || TREE_TYPE (TREE_TYPE (tmp)) != node))
+				{
+					write_declaration (tmp, spc+2);					
+					writeNewLine();
+		  		}
+				tmp = DECL_CHAIN (tmp);
+			}
+		}
+		INDENT (spc);
+		writeString("}");
+	}
+	else
+	{
+		/* Print the name of the structure.  */
+		if (TYPE_NAME (node))
+		{
+			INDENT (spc);
+			if (TREE_CODE (node) == RECORD_TYPE)				
+				writeString("struct ");			
+
+			write_generic_node(TYPE_NAME (node), spc, false);
+		}
+	}
+
+}
+
+//Helper function to write integer into the output file.
+void writeInteger(int tWrite)
+{
+	fprintf(fp,"%d",tWrite);
+}
+
+
+//Helper function to write space into the output file.
+void writeSpace(int spc)
+{
+	int i;
+	for(i=0;i<spc;i++)
+		fprintf(fp,"%s"," ");
+}
+
+//Helper function to write a new line to the output file.
+void writeNewLine()
+{
+	fprintf(fp,"%s","\n");
+}
+
+//Helper function to write a given string to the output file.
+void writeString(const char * str)
+{
+	fprintf(fp,"%s",str);
+}
+
+
+/* Print the declaration of a variable.  */
+void write_declaration (tree t, int spc)
+{
+	INDENT (spc);
+	writeSpace(spc);	
+
+	if (TREE_CODE (t) == TYPE_DECL)
+		writeString("typedef ");
+
+	if (CODE_CONTAINS_STRUCT (TREE_CODE (t), TS_DECL_WRTL) && DECL_REGISTER (t))
+		writeString("register ");
+
+	if (TREE_PUBLIC (t) && DECL_EXTERNAL (t))
+		writeString("extern ");
+	else if (TREE_STATIC (t))
+		writeString("static ");
+
+	/* Print the type and name.  */
+	if (TREE_TYPE (t) && TREE_CODE (TREE_TYPE (t)) == ARRAY_TYPE)
+	{
+		tree tmp;
+
+		/* Print array's type.  */
+		tmp = TREE_TYPE (t);
+		while (TREE_CODE (TREE_TYPE (tmp)) == ARRAY_TYPE)
+			tmp = TREE_TYPE (tmp);
+
+		write_generic_node(TREE_TYPE (tmp), spc, false);
+
+		/* Print variable's name.  */
+		
+		writeSpace(1);
+		write_generic_node(t, spc,false);
+
+		/* Print the dimensions.  */
+		tmp = TREE_TYPE (t);
+		while (TREE_CODE (tmp) == ARRAY_TYPE)
+		{
+			write_array_domain (TYPE_DOMAIN (tmp), spc);
+			tmp = TREE_TYPE (tmp);
+		}
+	}
+	else if (TREE_CODE (t) == FUNCTION_DECL)
+	{
+		write_generic_node (TREE_TYPE (TREE_TYPE (t)), spc, false);
+		writeSpace(1);
+
+		write_decl_name(t);
+		write_function_declaration (TREE_TYPE (t), spc);
+	}
+	else
+	{
+		/* Print type declaration.  */
+		write_generic_node(TREE_TYPE (t), spc, false);
+
+		/* Print variable's name.  */
+		writeSpace(1);
+		write_generic_node (t, spc, false);		
+	}
+
+
+	if (TREE_CODE (t) == VAR_DECL && DECL_HARD_REGISTER (t))
+	{
+		writeString("___asm___");
+		writeString("(");
+		write_generic_node(DECL_ASSEMBLER_NAME (t), spc, false);
+		writeString(")");
+	}
+
+  /* The initial value of a function serves to determine whether the function
+     is declared or defined.  So the following does not apply to function
+     nodes.  */
+	if (TREE_CODE (t) != FUNCTION_DECL)
+	{
+		/* Print the initial value.  */
+		if (DECL_INITIAL (t))
+		{
+			writeSpace(1);
+			writeString("=");
+			writeSpace(1);
+			write_generic_node ( DECL_INITIAL (t), spc, false);
+		}
+	}
+
+	if (TREE_CODE (t) == VAR_DECL && DECL_HAS_VALUE_EXPR_P (t))
+	{
+		writeString(" [value-expr: ");
+		write_generic_node(DECL_VALUE_EXPR (t), spc, false);
+		writeString("]");
+	}
+
+	writeString(";");
+}
+
+
+
+//Helper function to print characters into a file which have escape property
+void ePrint(const char *str)
+{
+	if (str == NULL)
+		return;
+
+	while (*str)
+	{
+		switch (str[0])
+		{
+			case '\b':
+				fprintf(fp,"\\b");				
+				break;
+
+			case '\f':
+				fprintf(fp,"\\f");
+				break;
+
+			case '\n':
+				fprintf(fp,"\\n");
+				break;
+
+			case '\r':
+				fprintf(fp,"\\r");
+				break;
+
+			case '\t':
+				fprintf(fp,"\\t");
+				break;
+
+			case '\v':
+				fprintf(fp,"\\v");
+				break;
+
+			case '\\':
+				fprintf(fp,"\\\\");
+				break;
+
+			case '\"':
+				fprintf(fp,"\\\"");
+				break;
+	
+			case '\'':
+				fprintf(fp,"\\'");
+				break;
+
+			default:
+				fprintf(fp,"%c",str[0]);
+				break;
+		}
+		str++;
+	}
+}
+
+//Helper funcion to check the data type of a node.
+int check_type(tree node)
+{
+	switch(TREE_CODE(node))
+	{
+		case INTEGER_TYPE:
+			if(TYPE_PRECISION(node)==8)
+				fprintf(fp,"%s","char ");
+			else
+				fprintf(fp,"%s","int ");		
+			if(DEBUG)
+				printf("Returns Integer\n");
+			break;
+		case VOID_TYPE:
+			fprintf(fp,"%s","void ");
+			if(DEBUG)
+				printf("Returns Void\n");
+			break;
+		case REAL_TYPE:
+			fprintf(fp,"%s","float ");
+			if(DEBUG)
+				printf("Returns Real\n");
+			break;
+	}
+	return 0;
+}
+
+//Helper function to write the name of a variable or function.
+void write_decl_name (tree node)
+{
+  if (DECL_NAME (node))
+  {
+	fprintf (fp,"%s",IDENTIFIER_POINTER(DECL_NAME (node)));
+  } 
+}
+
+//Helper function to write a function name
+void write_function_name (tree node)
+{
+  if (TREE_CODE (node) == NOP_EXPR)
+    node = TREE_OPERAND (node, 0);
+  write_decl_name (node);
+}
+
+/* Write the function declaration.  NODE is the FUNCTION_TYPE.  BUFFER, SPC and
+   FLAGS are as in write_generic_node.  */
+
+void write_function_declaration (tree node,int spc)
+{
+	bool wrote_arg = false;
+	tree arg;
+
+	writeSpace(1);	
+
+	writeString("(");
+
+	/* Print the argument types.  */
+	arg = TYPE_ARG_TYPES (node);
+	while (arg && arg != void_list_node && arg != error_mark_node)
+	{
+		if (wrote_arg)
+		{
+			writeString(",");			
+			writeSpace(1);
+		}
+		wrote_arg = true;
+		write_generic_node (TREE_VALUE (arg), spc,false);
+		arg = TREE_CHAIN (arg);
+	}
+
+	/* Drop the trailing void_type_node if we had any previous argument.  */
+	if (

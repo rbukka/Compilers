@@ -1,0 +1,41 @@
+int 22Hello = 5;
+if (a==2 || b==3){
+        /* hello there */
+}else{
+        if (a != 2){
+                /* hello there */
+        }
+
+a = a*2
+b = b/2
+a++
+++b
+
+--b
+a>b
+a<b
+
+121212.121212
+
+222222222222
+
+/* *********
+////////
+
+/* hello there
+this portion should
+be
+omitted
+from the
+output
+*/
+
+
+
+
+
+
+
+
+// hehehehe
+

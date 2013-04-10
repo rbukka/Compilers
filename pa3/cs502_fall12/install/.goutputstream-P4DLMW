@@ -1,0 +1,380 @@
+#include <stdio.h>
+#include "config.h"
+#include "system.h"
+#include "coretypes.h"
+#include "tm.h"
+#include "tree.h"
+#include "cgraph.h"
+#include "hashtab.h"
+#include "tree-iterator.h"
+#define DEBUG 1
+
+//File to store the final output
+FILE *fp;  
+
+//Main function
+int write_generic_node(tree node,int nspaces, bool sp);
+
+void dump_array_domain (tree domain, int spc);
+
+void write_decl_name (tree node);
+
+void dump_function_declaration (tree node,int spc);
+
+void dump_declaration (tree t, int spc);
+
+void writeNewLine();
+
+void writeSpace(int spc);
+
+char** structNames;
+
+
+void print_struct_decl (const_tree node, int spc)
+{
+	if(DEBUG)
+		printf("%s\n", "IN print_struct_decl");	
+	
+	/* Print the name of the structure.  */
+	if (TYPE_NAME (node))
+	{
+		//INDENT (spc);
+		if (TREE_CODE (node) == RECORD_TYPE)
+			//pp_string (buffer, "struct ");
+			writeString("struct ");
+		else if ((TREE_CODE (node) == UNION_TYPE || TREE_CODE (node) == QUAL_UNION_TYPE))
+			//pp_string (buffer, "union ");
+			writeString("union ");
+
+		//dump_generic_node (buffer, TYPE_NAME (node), spc, 0, false);
+		write_generic_node(TYPE_NAME (node), spc, false);
+	}
+
+	/* Print the contents of the structure.  */
+	//pp_newline (buffer);
+	writeNewLine();
+
+	//INDENT (spc);
+	//pp_character (buffer, '{');
+	writeString("{");
+	
+	//pp_newline (buffer);
+	writeNewLine();	
+
+	/* Print the fields of the structure.  */
+	{
+		tree tmp;
+		tmp = TYPE_FIELDS (node);
+		while (tmp)
+		{
+		/* Avoid to print recursively the structure.  */
+		/* FIXME : Not implemented correctly...,
+		what about the case when we have a cycle in the contain graph? ...
+		Maybe this could be solved by looking at the scope in which the
+		structure was declared.  */
+			if (TREE_TYPE (tmp) != node  && (TREE_CODE (TREE_TYPE (tmp)) != POINTER_TYPE || TREE_TYPE (TREE_TYPE (tmp)) != node))
+			{
+				dump_declaration (tmp, spc+2);
+				//pp_newline (buffer);
+				writeNewLine();
+	  		}
+			tmp = DECL_CHAIN (tmp);
+		}
+	}
+	//INDENT (spc);
+	//pp_character (buffer, '}');
+	writeString("}");
+}
+
+//Helper function to write integer into the output file.
+void writeInteger(int tWrite)
+{
+	fprintf(fp,"%d",tWrite);
+}
+
+
+//Helper function to write space into the output file.
+void writeSpace(int spc)
+{
+	int i;
+	for(i=0;i<spc;i++)
+		fprintf(fp,"%s"," ");
+}
+
+//Helper function to write a new line to the output file.
+void writeNewLine()
+{
+	fprintf(fp,"%s","\n");
+}
+
+//Helper function to write a given string to the output file.
+void writeString(const char * str)
+{
+	fprintf(fp,"%s",str);
+}
+
+
+/* Print the declaration of a variable.  */
+
+void dump_declaration (tree t, int spc)
+{
+	//INDENT (spc);
+	writeSpace(spc);	
+
+	if (TREE_CODE (t) == TYPE_DECL)
+		//pp_string (buffer, "typedef ");
+		writeString("typedef ");
+
+	if (CODE_CONTAINS_STRUCT (TREE_CODE (t), TS_DECL_WRTL) && DECL_REGISTER (t))
+		//pp_string (buffer, "register ");
+		writeString("register ");
+
+	if (TREE_PUBLIC (t) && DECL_EXTERNAL (t))
+		//pp_string (buffer, "extern ");
+		writeString("extern ");
+	else if (TREE_STATIC (t))
+		//pp_string (buffer, "static ");
+		writeString("static ");
+
+	/* Print the type and name.  */
+	if (TREE_TYPE (t) && TREE_CODE (TREE_TYPE (t)) == ARRAY_TYPE)
+	{
+		tree tmp;
+
+		/* Print array's type.  */
+		tmp = TREE_TYPE (t);
+		while (TREE_CODE (TREE_TYPE (tmp)) == ARRAY_TYPE)
+			tmp = TREE_TYPE (tmp);
+
+		//dump_generic_node (buffer, TREE_TYPE (tmp), spc, flags, false);
+		write_generic_node(TREE_TYPE (tmp), spc, false);
+
+		/* Print variable's name.  */
+		//pp_space (buffer);
+		writeSpace(1);
+		//dump_generic_node (buffer, t, spc, flags, false);
+		write_generic_node(t, spc,false);
+
+		/* Print the dimensions.  */
+		tmp = TREE_TYPE (t);
+		while (TREE_CODE (tmp) == ARRAY_TYPE)
+		{
+			dump_array_domain (TYPE_DOMAIN (tmp), spc);
+			tmp = TREE_TYPE (tmp);
+		}
+	}
+	else if (TREE_CODE (t) == FUNCTION_DECL)
+	{
+		//dump_generic_node (buffer, TREE_TYPE (TREE_TYPE (t)), spc, flags, false);
+		write_generic_node (TREE_TYPE (TREE_TYPE (t)), spc, false);
+		//pp_space (buffer);
+		writeSpace(1);
+
+		//dump_decl_name (buffer, t, flags);
+		write_decl_name(t);
+		//dump_function_declaration (buffer, TREE_TYPE (t), spc, flags);
+		dump_function_declaration (TREE_TYPE (t), spc);
+	}
+	else
+	{
+		/* Print type declaration.  */
+		//dump_generic_node (buffer, TREE_TYPE (t), spc, flags, false);
+		write_generic_node(TREE_TYPE (t), spc, false);
+
+		/* Print variable's name.  */
+		//pp_space (buffer);
+		writeSpace(1);
+		//dump_generic_node (buffer, t, spc, flags, false);
+		write_generic_node (t, spc, false);		
+	}
+
+
+	if (TREE_CODE (t) == VAR_DECL && DECL_HARD_REGISTER (t))
+	{
+		//pp_string (buffer, " __asm__ ");
+		writeString("___asm___");
+		//pp_character (buffer, '(');
+		writeString("(");
+		//dump_generic_node (buffer, DECL_ASSEMBLER_NAME (t), spc, flags, false);
+		write_generic_node(DECL_ASSEMBLER_NAME (t), spc, false);
+		//pp_character (buffer, ')');
+		writeString(")");
+	}
+
+  /* The initial value of a function serves to determine whether the function
+     is declared or defined.  So the following does not apply to function
+     nodes.  */
+	if (TREE_CODE (t) != FUNCTION_DECL)
+	{
+		/* Print the initial value.  */
+		if (DECL_INITIAL (t))
+		{
+			//pp_space (buffer);
+			writeSpace(1);
+	
+			//pp_character (buffer, '=');
+			writeString("=");
+
+			//pp_space (buffer);	
+			writeSpace(1);
+			//dump_generic_node (buffer, DECL_INITIAL (t), spc, flags, false);
+			write_generic_node ( DECL_INITIAL (t), spc, false);
+		}
+	}
+
+	if (TREE_CODE (t) == VAR_DECL && DECL_HAS_VALUE_EXPR_P (t))
+	{
+		//pp_string (buffer, " [value-expr: ");
+		writeString(" [value-expr: ");
+		//dump_generic_node (buffer, DECL_VALUE_EXPR (t), spc, flags, false);
+		write_generic_node(DECL_VALUE_EXPR (t), spc, false);
+		//pp_character (buffer, ']');
+		writeString("]");
+	}
+
+	//pp_character (buffer, ';');
+	writeString(";");
+}
+
+
+
+//Helper function to print characters into a file which have escape property
+void ePrint(const char *str)
+{
+	if (str == NULL)
+		return;
+
+	while (*str)
+	{
+		switch (str[0])
+		{
+			case '\b':
+				fprintf(fp,"\\b");
+				//writeString("\\b");
+				break;
+
+			case '\f':
+				fprintf(fp,"\\f");
+				//writeString("\\f");
+				break;
+
+			case '\n':
+				fprintf(fp,"\\n");
+				//writeString("\\n");
+				break;
+
+			case '\r':
+				fprintf(fp,"\\r");
+
+				//writeString("\\r");
+				break;
+
+			case '\t':
+				fprintf(fp,"\\t");
+
+				//writeString("\\t");
+				break;
+
+			case '\v':
+				fprintf(fp,"\\v");
+
+				//writeString("\\v");
+				break;
+
+			case '\\':
+				fprintf(fp,"\\\\");
+
+				//writeString("\\\\");
+				break;
+
+			case '\"':
+				fprintf(fp,"\\\"");
+
+				//writeString("\\\"");
+				break;
+	
+			case '\'':
+				fprintf(fp,"\\'");
+
+				//writeString("\\'");
+				break;
+
+			default:
+				fprintf(fp,"%c",str[0]);
+				break;
+		}
+		str++;
+	}
+}
+
+//Helper funcion to check the data type of a node.
+int check_type(tree node)
+{
+	switch(TREE_CODE(node))
+	{
+		case INTEGER_TYPE:
+			if(TYPE_PRECISION(node)==8)
+				fprintf(fp,"%s","char ");
+			else
+				fprintf(fp,"%s","int ");		
+			if(DEBUG)
+				printf("Returns Integer\n");
+			break;
+		case VOID_TYPE:
+			fprintf(fp,"%s","void ");
+			if(DEBUG)
+				printf("Returns Void\n");
+			break;
+		case REAL_TYPE:
+			fprintf(fp,"%s","float ");
+			if(DEBUG)
+				printf("Returns Real\n");
+			break;
+	}
+	return 0;
+}
+
+//Helper function to write the name of a variable or function.
+void write_decl_name (tree node)
+{
+  if (DECL_NAME (node))
+  {
+	fprintf (fp,"%s",IDENTIFIER_POINTER(DECL_NAME (node)));
+  } 
+}
+
+//Helper function to write a function name
+void write_function_name (tree node)
+{
+  if (TREE_CODE (node) == NOP_EXPR)
+    node = TREE_OPERAND (node, 0);
+  write_decl_name (node);
+}
+
+/* Dump a function declaration.  NODE is the FUNCTION_TYPE.  BUFFER, SPC and
+   FLAGS are as in dump_generic_node.  */
+
+void dump_function_declaration (tree node,int spc)
+{
+	bool wrote_arg = false;
+	tree arg;
+
+	//pp_space (buffer);
+	writeSpace(1);	
+
+	//pp_character (buffer, '(');
+	writeString("(");
+
+	/* Print the argument types.  */
+	arg = TYPE_ARG_TYPES (node);
+	while (arg && arg != void_list_node && arg != error_mark_node)
+	{
+		if (wrote_arg)
+		{
+			//pp_character (buffer, ',');
+			writeString(",");
+			//pp_space (buffer);
+			writeSpace(1);
+		}
+		wrote_arg = true;
+		write_generic_node 
